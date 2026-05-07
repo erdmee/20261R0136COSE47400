@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Model weights / training artifacts
+*.pt
+*.pth
+*.onnx
+*.engine
+runs/
+weights/
+
+# Datasets
+datasets/
+*.zip
+*.tar.gz
