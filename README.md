@@ -72,7 +72,6 @@ uv venv --python 3.11 .venv && source .venv/bin/activate
 uv pip install torch torchvision pyyaml numpy ultralytics opencv-python-headless
 
 # 2. 데이터 준비 (SeaDronesSee ODV2)
-#    https://www.kaggle.com/datasets/ubiratanfilho/sds-dataset
 python experiments/scripts/convert_sds.py \
     --coco /path/to/instances_train.json \
     --images /path/to/images/train \
