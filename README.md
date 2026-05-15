@@ -1,100 +1,116 @@
 # Small Object Detection on SeaDronesSee
 
-고려대학교 2026년 1학기 COSE 474 00분반 딥러닝 프로젝트.
+Course project for Korea University COSE474 (Deep Learning, Spring 2026).
 
-YOLOv8m을 베이스라인으로 두고 **작은 객체 탐지 (Small Object Detection)** 성능을 개선하기 위한 아키텍처 변형 실험. 해상 드론 영상 데이터셋 **SeaDronesSee Object Detection v2 (ODV2)** 에서 4가지 변형을 비교한다.
+We use YOLOv8m as the baseline and run an architecture-level ablation
+targeting **small object detection** on **SeaDronesSee Object Detection v2
+(ODV2)** — a maritime aerial dataset for search-and-rescue.
 
 ## Motivation
 
-해상 SAR (Search and Rescue) 시나리오에서 드론은 사람 (`swimmer`), 구조 장비 (`life_saving_appliances`), 부표 (`buoy`) 같은 작은 객체를 정확히 찾아야 한다. 그러나 일반적인 YOLO 베이스라인은 큰 객체 (`boat`) 에선 잘 작동하지만 작은 객체에선:
+In a maritime SAR setting the drone must accurately detect small targets:
+people (`swimmer`), rescue gear (`life_saving_appliances`), markers
+(`buoy`). A vanilla YOLOv8m baseline handles large objects (`boat`) well
+but shows two characteristic small-object weaknesses:
 
-- bbox 위치 정확도가 떨어지고 (AP@50 vs AP@50-95 격차가 큼)
-- 정답을 놓치는 비율이 높다 (낮은 Recall)
+- a large gap between AP@50 and AP@50-95 — boxes are found but not
+  precisely localized;
+- low Recall on the rarer small classes — many ground-truth instances are
+  missed.
 
-본 프로젝트는 **receptive field 와 feature map 해상도** 두 측면에서 변형을 시도해 이 한계를 정량적으로 분석한다.
+We probe two architectural axes — **receptive field** and **feature-map
+resolution** — and measure their per-class effect.
 
 ## Variants
 
-| ID | Variant | Change | Hypothesis |
-|---|---|---|---|
-| M0 | baseline | unmodified YOLOv8m | 비교 기준 |
-| M1 | sppf-k3 | SPPF kernel 5 → 3 | 작은 RF 가 작은 객체에 유리 |
-| M2 | p2 | + P2 detection head (stride 4) | 고해상도 feature map 이 본질적 해결책 |
-| M3 | p2-sppf-k3 | P2 + SPPF k=3 결합 | 두 변경의 시너지/충돌 검증 |
+| ID | Variant     | Change                                | Hypothesis |
+|----|-------------|---------------------------------------|------------|
+| M0 | baseline    | unmodified YOLOv8m                    | reference point |
+| M1 | sppf-k3     | SPPF kernel 5 → 3                     | smaller receptive field helps small objects |
+| M2 | p2          | + P2 detection head (stride 4)        | higher-resolution feature map is the principal remedy |
+| M3 | p2-sppf-k3  | P2 + SPPF k=3                         | combined: synergy or conflict |
 
 ## Repository Layout
 
 ```
 yolov8/              # detection-only YOLOv8 reimplementation
-                     # (모델/로스 수학을 공식 코드와 비트 단위 검증)
-  ├── model.py       # parse_model + YOLOv8 class
-  ├── loss.py        # v8DetectionLoss, BboxLoss, DFLoss
-  ├── tal.py         # TaskAlignedAssigner, anchors, dist↔bbox
-  ├── modules/       # Conv, C2f, Bottleneck, SPPF, DFL, Detect
-  ├── cfg/           # yolov8 yaml
-  ├── tests/         # forward/loss equivalence vs official weights
-  └── verify.py      # COCO weight transfer + forward allclose
+                     # (forward + loss verified bit-exact vs official yolov8m.pt)
+  ├── model.py            # parse_model + YOLOv8 class
+  ├── loss.py             # v8DetectionLoss, BboxLoss, DFLoss
+  ├── tal.py              # TaskAlignedAssigner, anchors, dist <-> bbox
+  ├── modules/            # Conv, C2f, Bottleneck, SPPF, DFL, Detect
+  ├── cfg/yolov8.yaml
+  ├── tests/              # forward / loss equivalence vs official weights
+  └── verify.py           # COCO weight transfer + forward allclose
 
-experiments/         # SeaDronesSee 학습 파이프라인 (ultralytics Trainer 기반)
-  ├── train.py       # 4가지 변형 통합 entry point
-  ├── cfg/           # yolov8m, +p2, +sppf-k3, +p2-sppf-k3 yamls
-  ├── data/sds.yaml  # SeaDronesSee ODV2 dataset descriptor (5 classes)
+experiments/         # SeaDronesSee ablation pipeline (ultralytics Trainer)
+  ├── train.py            # entry point: --model {baseline|sppf-k3|p2|p2-sppf-k3}
+  ├── cfg/                # 4 architecture yamls
+  ├── data/sds.yaml       # dataset descriptor (5 classes)
   ├── scripts/
-  │   ├── convert_sds.py             # COCO JSON → YOLO txt
-  │   ├── check_pretrained_transfer.py  # weight transfer sanity check
-  │   └── summarize_runs.py          # 변형별 결과 일괄 평가
-  ├── README.md      # 인스턴스 셋업 + 학습 가이드
-  └── RESULTS.md     # 학습 결과 표 + 분석
+  │   ├── convert_sds.py             # COCO JSON -> YOLO txt
+  │   ├── check_pretrained_transfer.py
+  │   └── summarize_runs.py          # aggregate per-variant val metrics
+  ├── README.md           # setup + training guide
+  └── RESULTS.md          # current numbers + analysis
 ```
 
-## Method 요약
+## Method
 
-- **Base**: YOLOv8m (25.9M params, COCO `yolov8m.pt` 로 transfer learning)
-- **Dataset**: SeaDronesSee ODV2 — 5 classes (swimmer, boat, jetski, life_saving_appliances, buoy)
-- **Training**: SGD (lr0=0.01) + cosine decay, 100 epochs, patience=30, batch=16, imgsz=640, AMP
-- **모든 변형이 동일 하이퍼파라미터** — 아키텍처 차이만 비교
-- **Hardware**: NVIDIA A100 80GB PCIe MIG 3g.40gb (Elice)
+- **Base model**: YOLOv8m (25.9M params, transfer-learned from COCO
+  `yolov8m.pt`).
+- **Dataset**: SeaDronesSee ODV2, 5 classes (swimmer, boat, jetski,
+  life_saving_appliances, buoy). Train 8,930 images / val 1,547 images.
+  The test split is not used in this project — its labels are not
+  publicly released (kept private for the official leaderboard), so all
+  numbers here are reported on val.
+- **Training recipe** (identical across all variants): SGD lr0=0.01 with
+  3-epoch warmup → cosine decay, 100 epochs with patience=30, batch=16,
+  imgsz=640, AMP, Mosaic augmentation.
+- **Evaluation**: best-epoch val mAP@0.5 / mAP@0.5:0.95 plus per-class
+  AP; recomputed by re-running `model.val()` on the saved `best.pt`.
+- **Hardware**: NVIDIA A100 80GB PCIe MIG 3g.40gb.
 
 ## Status
 
-자세한 결과/분석은 [`experiments/RESULTS.md`](experiments/RESULTS.md) 참고.
+See [`experiments/RESULTS.md`](experiments/RESULTS.md) for tables and
+analysis.
 
 - [x] M0 baseline — trained + evaluated
 - [x] M1 sppf-k3 — trained + evaluated
-- [ ] M2 p2 — training in progress
+- [x] M2 p2 — trained + evaluated (principal contribution validated)
 - [ ] M3 p2-sppf-k3 — pending
 
 ## Reproduction
 
 ```bash
-# 1. 환경
+# 1. environment
 uv venv --python 3.11 .venv && source .venv/bin/activate
 uv pip install torch torchvision pyyaml numpy ultralytics opencv-python-headless
 
-# 2. 데이터 준비 (SeaDronesSee ODV2)
+# 2. COCO-pretrained weights
+mkdir -p experiments/weights
+curl -L -o experiments/weights/yolov8m.pt \
+    https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8m.pt
+
+# 3. dataset (convert SDS ODV2 COCO JSON to YOLO txt; do this for train and val)
 python experiments/scripts/convert_sds.py \
     --coco /path/to/instances_train.json \
     --images /path/to/images/train \
     --out /path/to/sds --split train
-# val 도 동일
 
-# 3. COCO pretrained 가중치 다운로드
-curl -L -o experiments/weights/yolov8m.pt \
-    https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8m.pt
-
-# 4. transfer 검증
-python experiments/scripts/check_pretrained_transfer.py
-
-# 5. 학습 (4가지 변형 각각)
+# 4. train
 python experiments/train.py --model baseline
 python experiments/train.py --model sppf-k3
 python experiments/train.py --model p2
 python experiments/train.py --model p2-sppf-k3
 
-# 6. 결과 비교 표 자동 생성
-python experiments/scripts/summarize_runs.py
+# 5. evaluate
+python experiments/scripts/summarize_runs.py \
+    --models baseline sppf-k3 p2 p2-sppf-k3
 ```
 
 ## License
 
-코드는 ultralytics (AGPL-3.0) 기반이므로 동일 라이선스를 따른다.
+Built on top of `ultralytics` (AGPL-3.0); this project follows the same
+license.

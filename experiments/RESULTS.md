@@ -1,8 +1,9 @@
 # SeaDronesSee ODV2 — Experiment Results
 
-Comparison of YOLOv8m architecture variants on SeaDronesSee Object Detection v2.
-All numbers below are **val-set results at the best epoch**, measured by re-running
-`model.val()` on the saved `best.pt` (see `scripts/summarize_runs.py`).
+Comparison of four YOLOv8m architecture variants on SeaDronesSee Object
+Detection v2. All numbers are **val-set metrics at the best epoch**,
+obtained by re-running `model.val()` on the saved `best.pt`
+(`scripts/summarize_runs.py`).
 
 ---
 
@@ -10,156 +11,229 @@ All numbers below are **val-set results at the best epoch**, measured by re-runn
 
 | Item | Value |
 |---|---|
-| Base model | YOLOv8m (25.9M params) |
-| Pretrained | COCO `yolov8m.pt` (transferred into each variant; shape-incompatible layers re-init) |
-| Dataset | SeaDronesSee Object Detection V2 |
-| Train / Val images | 8,930 / 1,547 |
-| Total bboxes (train) | 57,760 |
-| Classes (5, `ignored` skipped) | swimmer, boat, jetski, life_saving_appliances, buoy |
-| Image size | 640 |
-| Batch | 16 |
-| Optimizer | SGD (lr0=0.01, momentum=0.937, weight_decay=0.0005) |
-| Schedule | warmup 3 ep → cosine; 100 epochs with `patience=30` |
-| Augmentation | Mosaic + HSV + scale/translate + fliplr (no flipud) |
-| Precision | AMP (mixed precision) |
-| Hardware | A100 80GB PCIe MIG 3g.40gb (Elice) |
+| Base model            | YOLOv8m (25.9M params) |
+| Pretrained            | COCO `yolov8m.pt` (transfer learning; shape-incompatible layers re-init) |
+| Dataset               | SeaDronesSee Object Detection v2 |
+| Train / Val images    | 8,930 / 1,547 |
+| Classes (5)           | swimmer, boat, jetski, life_saving_appliances, buoy |
+| Evaluation split      | val (test labels are not publicly released — kept for the official leaderboard — so the test set is not used here) |
+| Image size            | 640 |
+| Batch                 | 16 |
+| Optimizer             | SGD (lr0=0.01, momentum=0.937, weight_decay=5e-4) |
+| Schedule              | 3-epoch warmup → cosine; 100 epochs, `patience=30` |
+| Augmentation          | Mosaic + HSV + scale/translate + fliplr (no flipud) |
+| Precision             | AMP (mixed precision) |
+| Hardware              | NVIDIA A100 80GB PCIe MIG 3g.40gb (Elice) |
 
-Every variant trains under **identical** hyperparameters; only the architecture cfg differs.
+Every variant trains under **identical** hyperparameters; only the
+architecture cfg differs.
 
 ---
 
 ## Variants
 
-| ID | Variant | Cfg file | Change vs baseline |
+| ID | Variant | Cfg | Change vs baseline |
 |---|---|---|---|
-| **M0** | baseline | `cfg/yolov8m.yaml` | — (unmodified YOLOv8m) |
-| **M1** | sppf-k3 | `cfg/yolov8m-sppf-k3.yaml` | SPPF kernel 5 → 3 (smaller receptive field) |
-| **M2** | p2 | `cfg/yolov8m-p2.yaml` | + P2 detection head (stride 4) |
-| M3 | p2-sppf-k3 | `cfg/yolov8m-p2-sppf-k3.yaml` | P2 + SPPF k=3 combined — *pending* |
+| **M0** | baseline    | `cfg/yolov8m.yaml`             | — (unmodified YOLOv8m) |
+| **M1** | sppf-k3     | `cfg/yolov8m-sppf-k3.yaml`     | SPPF kernel 5 → 3 (smaller receptive field) |
+| **M2** | p2          | `cfg/yolov8m-p2.yaml`          | + P2 detection head (stride 4) |
+| M3     | p2-sppf-k3  | `cfg/yolov8m-p2-sppf-k3.yaml`  | P2 + SPPF k=3 (pending) |
 
 ---
 
 ## Overall Results (val)
 
-| Model | mAP@50 | mAP@50-95 | Precision | Recall |
-|---|---|---|---|---|
-| baseline | 0.732 | 0.439 | 0.889 | 0.708 |
-| sppf-k3 | 0.731 | 0.439 | 0.885 | 0.719 |
-| **p2** | **0.785** | **0.468** | **0.897** | **0.757** |
+| Model     | mAP@50    | mAP@50-95 | Precision | Recall    |
+|-----------|-----------|-----------|-----------|-----------|
+| baseline  | 0.732     | 0.439     | 0.889     | 0.708     |
+| sppf-k3   | 0.731     | 0.439     | 0.885     | 0.719     |
+| **p2**    | **0.785** | **0.468** | **0.897** | **0.757** |
 
-**Δ (p2 − baseline)**:
-- mAP@50:    **+0.053** (+7.2% relative)
-- mAP@50-95: **+0.029** (+6.6% relative)
-- Precision: +0.008 (오탐 증가 없음)
-- Recall:    **+0.049** (놓침 감소, SAR 시나리오에서 핵심)
+### Pairwise deltas (overall)
 
-**Δ (sppf-k3 − baseline)**: 거의 0 (mAP −0.001, ±0.000) — SPPF k=3 단독으로는 전체 성능 변화 미미.
+| Pair                    | Δ mAP@50  | Δ mAP@50-95 | Δ Precision | Δ Recall |
+|-------------------------|-----------|-------------|-------------|----------|
+| sppf-k3 − baseline      | −0.001    | ±0.000      | −0.004      | +0.011   |
+| p2 − baseline           | **+0.053** | **+0.029**  | +0.008      | **+0.049** |
+| p2 − sppf-k3            | **+0.054** | **+0.029**  | +0.012      | **+0.038** |
 
-**P2 추가가 우리 가설을 명확히 입증**: 고해상도 feature map (stride 4) 이 작은 객체 탐지의 본질적 한계를 직접 해결.
+SPPF k=3 alone barely moves the aggregate numbers (every delta ≤ 0.011).
+Adding the P2 head delivers the only large effect: +0.053 mAP@50,
++0.049 Recall — a notable safety gain in a SAR setting where each unit
+of Recall corresponds to fewer missed targets.
 
 ---
 
 ## Per-Class AP@50
 
-| Model | boat | buoy | jetski | life_saving_appliances | swimmer |
-|---|---|---|---|---|---|
-| baseline | **0.965** | 0.639 | **0.911** | 0.378 | 0.766 |
-| sppf-k3 | 0.963 | 0.658 | 0.924 | 0.356 | 0.753 |
-| **p2** | 0.960 | **0.803** | 0.869 | **0.490** | **0.802** |
+| Model     | boat      | buoy      | jetski    | life_saving_appliances | swimmer   |
+|-----------|-----------|-----------|-----------|------------------------|-----------|
+| baseline  | **0.965** | 0.639     | **0.911** | 0.378                  | 0.766     |
+| sppf-k3   | 0.963     | 0.658     | 0.924     | 0.356                  | 0.753     |
+| **p2**    | 0.960     | **0.803** | 0.869     | **0.490**              | **0.802** |
 
-**Δ (p2 − baseline)** per class:
-- boat: −0.005 (큰 객체, 이미 ceiling)
-- **buoy: +0.164** (가장 큰 개선)
-- jetski: −0.042 (중간 객체, 약간 악화 — interesting trade-off)
-- **life_saving_appliances: +0.112**
-- **swimmer: +0.036**
+### Pairwise deltas (AP@50)
 
-**핵심 발견**: 작은 객체 (buoy, LSA, swimmer) 3개에서 **모두 큰 폭으로 개선**. 큰 객체 (boat) 는 거의 변화 없음 (이미 0.965 ceiling). jetski는 약간 악화 — 중간 크기 객체에서 P2 분기가 P4 분기 학습을 약간 분산시킨 효과 가능.
+| Pair                    | boat   | buoy       | jetski | life_saving_appliances | swimmer |
+|-------------------------|--------|------------|--------|------------------------|---------|
+| sppf-k3 − baseline      | −0.002 | +0.019     | +0.013 | −0.022                 | −0.013  |
+| p2 − baseline           | −0.005 | **+0.164** | −0.042 | **+0.112**             | **+0.036** |
+| p2 − sppf-k3            | −0.003 | **+0.145** | −0.055 | **+0.134**             | **+0.049** |
+
+Per-pair reading:
+
+- **sppf-k3 vs baseline**: small, mixed-sign movements (≤ 0.022 absolute).
+  Marginal gains on buoy/jetski; regressions on life_saving_appliances
+  and swimmer. No clear pattern.
+- **p2 vs baseline**: large, consistent gains on every small-object class
+  (swimmer, buoy, life_saving_appliances), with the trade-off being a
+  4.2-point drop on jetski. boat unchanged.
+- **p2 vs sppf-k3**: same shape as p2 vs baseline, slightly larger gaps
+  on the small classes — p2 is doing the work, not sppf-k3.
 
 ---
 
 ## Per-Class AP@50-95 (stricter, COCO-style)
 
-| Model | boat | buoy | jetski | life_saving_appliances | swimmer |
-|---|---|---|---|---|---|
-| baseline | **0.724** | 0.390 | **0.596** | 0.181 | 0.307 |
-| sppf-k3 | 0.721 | 0.388 | 0.632 | 0.156 | 0.300 |
-| **p2** | 0.722 | **0.474** | 0.580 | **0.231** | **0.332** |
+| Model     | boat      | buoy      | jetski    | life_saving_appliances | swimmer   |
+|-----------|-----------|-----------|-----------|------------------------|-----------|
+| baseline  | **0.724** | 0.390     | **0.596** | 0.181                  | 0.307     |
+| sppf-k3   | 0.721     | 0.388     | 0.632     | 0.156                  | 0.300     |
+| **p2**    | 0.722     | **0.474** | 0.580     | **0.231**              | **0.332** |
 
-**Δ (p2 − baseline)** per class:
-- boat: −0.002 (변화 없음)
-- **buoy: +0.084** (+21.5% relative)
-- jetski: −0.016
-- **life_saving_appliances: +0.050** (+27.6% relative)
-- **swimmer: +0.025** (+8.1% relative)
+### Pairwise deltas (AP@50-95)
 
-**작은 객체 localization 자체도 개선**: AP@50-95는 bbox 위치 정확도까지 평가하는 엄격한 지표. P2 가 작은 객체의 정확한 위치까지 잡아낸다는 증거.
+| Pair                    | boat   | buoy       | jetski | life_saving_appliances | swimmer    |
+|-------------------------|--------|------------|--------|------------------------|------------|
+| sppf-k3 − baseline      | −0.003 | −0.002     | +0.036 | −0.025                 | −0.007     |
+| p2 − baseline           | −0.002 | **+0.084** | −0.016 | **+0.050**             | **+0.025** |
+| p2 − sppf-k3            | +0.001 | **+0.086** | −0.052 | **+0.075**             | **+0.032** |
+
+Per-pair reading:
+
+- **sppf-k3 vs baseline**: mostly noise (≤ 0.025 absolute). Only jetski
+  moves meaningfully (+0.036), but at the cost of the smallest classes.
+- **p2 vs baseline**: localization itself improves on every small class
+  — buoy +21.5% relative, life_saving_appliances +27.6% relative,
+  swimmer +8.1% relative — confirming that the new P2/4 feature map
+  helps the network not only *find* small objects but also *place the
+  boxes* on them. jetski regresses slightly.
+- **p2 vs sppf-k3**: nearly identical sign pattern, larger magnitudes —
+  again, p2 is the source of the SOD improvement.
 
 ---
 
 ## Analysis
 
-### Main finding — P2 head 가 SOD 문제의 본질적 해결책
+The three variants form three pairwise comparisons. Each pair isolates a
+single architectural intervention:
 
-전체 mAP@50 +0.053, mAP@50-95 +0.029. **작은 객체 클래스 3개에서 모두 큰 개선**:
+| Pair                | Architectural change isolated                              |
+|---------------------|------------------------------------------------------------|
+| sppf-k3 vs baseline | receptive field of SPPF (k=5 → k=3) only                   |
+| p2 vs baseline      | extra detection head at stride 4 (P2/4 feature map) only   |
+| p2 vs sppf-k3       | gives an "is the gain from P2 or from RF?" cross-check     |
 
-| 작은 객체 | AP@50 Δ | AP@50-95 Δ |
-|---|---|---|
-| buoy | +0.164 | +0.084 |
-| life_saving_appliances | +0.112 | +0.050 |
-| swimmer | +0.036 | +0.025 |
+### Pair 1 — sppf-k3 vs baseline (RF intervention)
 
-큰 객체 (boat) 는 거의 변화 없음 (±0.005) — **P2 추가가 큰 객체 검출을 해치지 않으면서 작은 객체만 선택적으로 개선**. 이상적인 변형 결과.
+- **Overall**: Δ mAP@50 −0.001, Δ mAP@50-95 ±0.000, Δ Recall +0.011.
+  The deep-backbone receptive field is not, by itself, a strong lever
+  for this dataset.
+- **Per-class**: small movements (≤ 0.022 absolute) with **mixed signs**.
+  buoy +0.019, jetski +0.013, but life_saving_appliances −0.022 and
+  swimmer −0.013 at AP@50. No coherent story emerges.
+- **Interpretation**: shrinking the SPPF kernel narrows the
+  global-context window. Objects whose recognition depends on the
+  surrounding scene (people, rescue gear) lose information; objects
+  that look like themselves (buoy) tolerate it. Net effect on
+  aggregate metrics: noise.
 
-### SPPF k=3 vs P2 — 같은 motivation, 다른 효과
+### Pair 2 — p2 vs baseline (resolution intervention)
 
-두 변형 모두 "작은 객체 탐지 개선" 을 노렸으나 결과는 정반대:
+- **Overall**: Δ mAP@50 **+0.053**, Δ mAP@50-95 **+0.029**,
+  Δ Recall **+0.049**. Precision is also slightly up (+0.008), so the
+  Recall gain does not come from extra false positives.
+- **Per-class AP@50**: **all three small-object classes improve
+  substantially** (buoy +0.164, life_saving_appliances +0.112,
+  swimmer +0.036). Large-object class (boat) is unchanged
+  (−0.005, already at 0.965 ceiling). One trade-off: jetski −0.042.
+- **Per-class AP@50-95**: same direction with double-digit relative
+  gains on small classes (buoy +21.5%, life_saving_appliances +27.6%,
+  swimmer +8.1%). Localization quality itself improves, not just the
+  detected count.
+- **Interpretation**: adding a stride-4 detection branch gives small
+  objects a feature map at the resolution they need to be represented
+  in. The improvement is exactly where SOD theory predicts it.
 
-- **SPPF k=3**: receptive field만 조정 → 작은 객체 단순 형태 (buoy +0.019) 에만 부분 개선, 컨텍스트 필요한 객체 (LSA −0.022, swimmer −0.013) 에는 악화
-- **P2 head**: feature map 해상도 자체 증가 → 모든 작은 객체에 일관된 큰 개선
+### Pair 3 — p2 vs sppf-k3 (cross-check)
 
-**시사점**: 작은 객체 탐지의 핵심 병목은 **receptive field 크기가 아니라 feature map 해상도**. P2 가 본질적 해결책.
+- **Overall**: Δ mAP@50 **+0.054**, Δ mAP@50-95 **+0.029**. Almost
+  identical to p2 vs baseline.
+- **Per-class**: same sign pattern as p2 vs baseline, slightly larger
+  magnitudes on the small classes (e.g. buoy +0.145 vs +0.164 at AP@50).
+- **Interpretation**: the improvement from p2 is **not** explained by
+  the RF change — sppf-k3 itself does not improve over baseline, and
+  p2 improves over sppf-k3 by the same amount as it improves over
+  baseline. The P2 head is doing the work.
 
-### Trade-off — jetski 의 작은 악화
+### The jetski regression
 
-| Model | jetski AP@50 | jetski AP@50-95 |
-|---|---|---|
-| baseline | 0.911 | 0.596 |
-| sppf-k3 | 0.924 | 0.632 |
-| **p2** | 0.869 | 0.580 |
+jetski is the one class where p2 *underperforms* baseline (and sppf-k3).
 
-jetski (중간 크기, 인스턴스 320개) 는 P2 에서 −0.042 악화. 가능한 해석:
-- P2 분기가 P3/P4 학습을 일부 분산
-- 중간 크기 객체는 P3/P4 가 본디 잘 잡았는데, P2 추가로 anchor가 4배 늘어서 매칭 경쟁
-- 또는 학습 데이터 분포 (jetski 인스턴스 적음) + class imbalance 영향
+| Model     | jetski AP@50 | jetski AP@50-95 |
+|-----------|--------------|-----------------|
+| baseline  | 0.911        | 0.596           |
+| sppf-k3   | **0.924**    | **0.632**       |
+| p2        | 0.869        | 0.580           |
 
-미래 작업으로 **크기/클래스별 differentiated branch** (예: jetski 같은 중간 객체용 별도 모듈) 가능성.
+Jetski is medium-sized (~320 val instances). Plausible causes:
 
-### Recall 분석 — SAR 관점
+- The new P2 branch adds ~4× anchors (8,400 → 34,000) and absorbs
+  gradient signal previously concentrated on P3/P4 — the levels that
+  were responsible for medium objects.
+- jetski is the variant most sensitive to this redistribution, since
+  it sits at the boundary between "small enough to benefit from P2"
+  and "medium enough to be served by P3/P4."
 
-| Class | baseline R | **p2 R** | Δ |
-|---|---|---|---|
-| (전체) | 0.708 | **0.757** | **+0.049** |
-| swimmer (estimated) | ~0.635 | (개선) | |
-| LSA (estimated) | ~0.014 | (대폭 개선, AP 0.378→0.490 이 시사) | |
+Class- or size-aware branch routing is a candidate fix.
 
-**SAR 시나리오에서 Recall 향상은 "놓치는 조난자 감소" 와 직결**. P2 의 약 5% Recall 향상은 100명 중 5명 더 찾는 차이.
+### Recall in the SAR context
 
-### Class imbalance + AP variance
+Recall is the most operationally meaningful metric for maritime
+search-and-rescue: each missed detection is a target the system fails
+to surface.
 
-life_saving_appliances 는 val 인스턴스가 330개로 적어 AP 분산이 큼. 그럼에도 P2 가 sppf-k3 대비 +0.134 (0.356 → 0.490) 개선한 건 noise 수준이 아닌 **structural improvement** 로 봄.
+| Model     | Overall Recall |
+|-----------|----------------|
+| baseline  | 0.708          |
+| sppf-k3   | 0.719          |
+| **p2**    | **0.757**      |
+
+The +0.049 Recall gain of p2 over baseline translates to roughly five
+additional true detections per hundred ground-truth instances — a
+direct safety relevance, not merely a benchmark number.
+
+### Caveats
+
+- `life_saving_appliances` has only ~330 val instances, so per-class
+  AP variance is higher. The sppf-k3 ↔ baseline fluctuations are
+  ≤ 0.025; the p2 improvements (+0.112 AP@50, +0.050 AP@50-95) are
+  several times larger and therefore unlikely to be noise.
+- Numbers are single-seed runs. Multi-seed averaging is a follow-up
+  item.
 
 ---
 
 ## Takeaways
 
-1. **P2 head 추가는 SOD 의 본질적 해결책** — feature map 해상도 증가로 작은 객체의 detection + localization 모두 개선
-2. **SPPF k 변경은 단독으로 약함** — receptive field 만 만지는 변경은 한정적, 일부 클래스에서만 도움
-3. **P2 가 큰 객체 성능을 해치지 않음** — boat 등 큰 객체 AP 거의 변화 없음. 안전한 변형
-4. **다음 단계 후보**:
-   - P2 + SPPF k=3 결합 (M3) — RF 와 해상도 둘 다 만지면 추가 개선/충돌 확인
-   - 크기별 differentiated module — jetski 같은 중간 객체 trade-off 완화
-   - 더 작은 stride (P1) 또는 image super-resolution
+1. **P2 head addresses the SOD bottleneck**: feature-map resolution
+   matters more than receptive-field size for small-object detection on
+   this dataset.
+2. **SPPF k=3 is not a sufficient intervention** on its own.
+3. **P2 does not hurt the large-object class** — a clean Pareto
+   improvement on small objects.
+4. **Open directions**: P2 + SPPF k=3 (M3, pending), size-aware branch
+   design to recover the jetski regression, multi-seed evaluation.
 
 ---
 
@@ -167,27 +241,29 @@ life_saving_appliances 는 val 인스턴스가 330개로 적어 AP 분산이 큼
 
 - [x] M0 baseline — trained + evaluated
 - [x] M1 sppf-k3 — trained + evaluated
-- [x] **M2 p2 — trained + evaluated** (핵심 contribution 확인)
-- [ ] M3 p2-sppf-k3 — *training pending (시간 여유 시)*
+- [x] **M2 p2 — trained + evaluated** (core contribution validated)
+- [ ] M3 p2-sppf-k3 — training pending
 
 ---
 
 ## Reproduction
 
 ```bash
-# train (each variant uses identical hyperparameters)
+# train (all variants use identical hyperparameters)
 python experiments/train.py --model baseline
 python experiments/train.py --model sppf-k3
 python experiments/train.py --model p2
 python experiments/train.py --model p2-sppf-k3
 
-# evaluate (best.pt val 재평가)
-python experiments/scripts/summarize_runs.py --models baseline sppf-k3 p2 p2-sppf-k3
+# evaluate
+python experiments/scripts/summarize_runs.py \
+    --models baseline sppf-k3 p2 p2-sppf-k3
 ```
 
-산출물:
-- `experiments/runs/<model>/weights/best.pt` — 체크포인트
-- `experiments/runs/<model>/results.csv` — epoch별 metric
-- `experiments/runs/<model>/results.png` — 학습 곡선
-- `experiments/runs/<model>/confusion_matrix.png` — confusion matrix
-- `experiments/summary.csv` — 전체 모델 일괄 비교
+Per-variant outputs under `experiments/runs/<model>/`:
+
+- `weights/best.pt` — checkpoint at best val mAP@0.5:0.95
+- `results.csv` — per-epoch metrics
+- `results.png` — training curves
+- `confusion_matrix.png` — class confusion on val
+- `experiments/summary.csv` — aggregated comparison
